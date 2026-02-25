@@ -1,43 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Download, Upload, Trash2, Save, Palette } from 'lucide-react';
+import { Download, Upload, Trash2, Save, Palette, Paintbrush } from 'lucide-react';
 
-const THEMES = {
-  classic: {
-    id: 'classic',
-    name: '미색 (Classic)',
-    bg: '#f5f5f0',
-    text: 'text-gray-900',
-    border: 'border-gray-800',
-    accent: 'bg-gray-800 text-gray-100',
-    accentDot: 'bg-gray-800'
-  },
-  dark: {
-    id: 'dark',
-    name: '심연 (Dark)',
-    bg: '#1a1a1a',
-    text: 'text-gray-200',
-    border: 'border-gray-500',
-    accent: 'bg-gray-700 text-gray-200',
-    accentDot: 'bg-gray-400'
-  },
-  blood: {
-    id: 'blood',
-    name: '선혈 (Blood)',
-    bg: '#2b1111',
-    text: 'text-[#e6d5d5]',
-    border: 'border-[#8a3333]',
-    accent: 'bg-[#5c1c1c] text-[#e6d5d5]',
-    accentDot: 'bg-[#cc3333]'
-  },
-  parchment: {
-    id: 'parchment',
-    name: '양피지 (Parchment)',
-    bg: '#e8dcc4',
-    text: 'text-[#4a3629]',
-    border: 'border-[#7a6453]',
-    accent: 'bg-[#5c4738] text-[#e8dcc4]',
-    accentDot: 'bg-[#7a6453]'
-  }
+// 1. 테마 데이터를 인라인 스타일(HEX 색상)로 전면 개편했습니다.
+const PRESET_THEMES = {
+  classic: { name: '미색', bg: '#f5f5f0', text: '#111827', border: '#1f2937', accentBg: '#1f2937', accentText: '#f5f5f0' },
+  dark: { name: '심연', bg: '#1a1a1a', text: '#e5e7eb', border: '#6b7280', accentBg: '#374151', accentText: '#e5e7eb' },
+  blood: { name: '선혈', bg: '#2b1111', text: '#e6d5d5', border: '#8a3333', accentBg: '#5c1c1c', accentText: '#e6d5d5' },
+  parchment: { name: '양피지', bg: '#e8dcc4', text: '#4a3629', border: '#7a6453', accentBg: '#5c4738', accentText: '#e8dcc4' }
 };
 
 const DEFAULT_STATE = {
@@ -54,6 +23,8 @@ const DEFAULT_STATE = {
   after: '다음 세션에서는 관찰력 판정을 더 적극적으로 해보고 싶습니다.',
   review: '한동안 수프를 먹지 못할 것 같습니다.',
   theme: 'classic',
+  // 2. 커스텀 색상 데이터를 추가했습니다.
+  customColor: { bg: '#0f172a', text: '#38bdf8', accent: '#0284c7' },
   image: null,
 };
 
@@ -62,8 +33,9 @@ export default function App() {
   const [isExporting, setIsExporting] = useState(false);
   const cardRef = useRef(null);
 
+  // 데이터 충돌 방지를 위해 v4로 버전 업그레이드
   useEffect(() => {
-    const savedData = localStorage.getItem('coc-session-data-v3');
+    const savedData = localStorage.getItem('coc-session-data-v4');
     if (savedData) {
       try {
         setFormData(JSON.parse(savedData));
@@ -75,9 +47,8 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('coc-session-data-v3', JSON.stringify(formData));
+      localStorage.setItem('coc-session-data-v4', JSON.stringify(formData));
     } catch (e) {
-      // ESLint 경고 해결: 에러 객체 e를 console.warn에 포함하여 사용
       console.warn('저장 용량을 초과하여 자동 저장에 실패했을 수 있습니다.', e);
     }
   }, [formData]);
@@ -85,6 +56,14 @@ export default function App() {
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleCustomColorChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      customColor: { ...prev.customColor, [name]: value }
+    }));
   };
 
   const handleImageUpload = (e) => {
@@ -107,41 +86,22 @@ export default function App() {
     setIsExporting(true);
 
     try {
-      if (!window.html2canvas) {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement('script');
-          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-          script.onload = resolve;
-          script.onerror = reject;
-          document.head.appendChild(script);
-        });
-      }
-
-      // 텍스트 쏠림 현상 방지를 위해 스크롤을 맨 위로 고정하고, 렌더링 옵션을 세밀하게 조정합니다.
-      const canvas = await window.html2canvas(cardRef.current, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: THEMES[formData.theme].bg,
-        scrollY: -window.scrollY, // 스크롤 오프셋 보정
-        windowWidth: document.documentElement.offsetWidth,
-        windowHeight: document.documentElement.offsetHeight,
-        onclone: (document) => {
-          // 복제된 DOM에서 약간의 여백 쏠림을 보정할 수 있습니다.
-          const element = document.getElementById('session-card');
-          if(element) {
-             element.style.transform = 'none';
-          }
-        }
+      // 3. 텍스트 쏠림의 주범인 html2canvas를 버리고, 가장 완벽한 html-to-image를 동적 로드합니다.
+      const htmlToImage = await import('https://esm.sh/html-to-image');
+      
+      const dataUrl = await htmlToImage.toPng(cardRef.current, {
+        pixelRatio: 2, // 고해상도
+        backgroundColor: currentTheme.bg,
+        style: { transform: 'scale(1)', margin: 0 } 
       });
 
-      const image = canvas.toDataURL('image/png', 1.0);
       const link = document.createElement('a');
       link.download = `[TRPG]${formData.scenarioName}_세션리뷰.png`;
-      link.href = image;
+      link.href = dataUrl;
       link.click();
     } catch (error) {
       console.error('이미지 저장 중 오류 발생:', error);
-      alert('이미지를 저장하는 데 실패했습니다.');
+      alert('이미지를 저장하는 데 실패했습니다. 콘솔 창을 확인해주세요.');
     } finally {
       setIsExporting(false);
     }
@@ -153,7 +113,17 @@ export default function App() {
     }
   };
 
-  const currentTheme = THEMES[formData.theme];
+  // 4. 현재 테마 색상 결정 로직 (커스텀일 경우 사용자가 지정한 색상 적용)
+  const currentTheme = formData.theme === 'custom' 
+    ? {
+        bg: formData.customColor.bg,
+        text: formData.customColor.text,
+        border: formData.customColor.text, // 테두리는 글자색을 따라감
+        accentBg: formData.customColor.accent,
+        accentText: formData.customColor.bg // 포인트 글자색은 배경색을 써서 대비를 줌
+      }
+    : PRESET_THEMES[formData.theme];
+
   const paperTexture = `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.08'/%3E%3C/svg%3E")`;
 
   return (
@@ -173,22 +143,46 @@ export default function App() {
         </div>
 
         <div className="space-y-5">
-          {/* 테마 선택 */}
-          <div className="space-y-2 bg-gray-800 p-3 rounded-md border border-gray-700">
+          {/* 테마 선택 영역 */}
+          <div className="space-y-3 bg-gray-800 p-4 rounded-md border border-gray-700">
             <label className="text-xs text-gray-400 font-bold uppercase tracking-wider flex items-center gap-2">
               <Palette size={14} /> 카드 테마
             </label>
-            <div className="flex gap-2">
-              {Object.values(THEMES).map((theme) => (
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(PRESET_THEMES).map(([key, theme]) => (
                 <button
-                  key={theme.id}
-                  onClick={() => setFormData(prev => ({ ...prev, theme: theme.id }))}
-                  className={`flex-1 py-1 px-2 text-xs rounded transition-all ${formData.theme === theme.id ? 'ring-2 ring-indigo-500 bg-gray-700 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700'}`}
+                  key={key}
+                  onClick={() => setFormData(prev => ({ ...prev, theme: key }))}
+                  className={`flex-1 py-1 px-2 text-xs rounded transition-all ${formData.theme === key ? 'ring-2 ring-indigo-500 bg-gray-700 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700'}`}
                 >
                   {theme.name}
                 </button>
               ))}
+              <button
+                onClick={() => setFormData(prev => ({ ...prev, theme: 'custom' }))}
+                className={`flex-1 py-1 px-2 text-xs rounded transition-all flex items-center justify-center gap-1 ${formData.theme === 'custom' ? 'ring-2 ring-indigo-500 bg-indigo-900 text-indigo-100' : 'bg-gray-900 text-gray-400 hover:bg-gray-700'}`}
+              >
+                <Paintbrush size={12} /> 커스텀
+              </button>
             </div>
+            
+            {/* 커스텀 테마 선택 시 나타나는 컬러 피커 */}
+            {formData.theme === 'custom' && (
+              <div className="flex gap-4 pt-3 mt-2 border-t border-gray-700 justify-between">
+                <label className="flex flex-col items-center gap-1 text-[11px] text-gray-400">
+                  배경색
+                  <input type="color" name="bg" value={formData.customColor.bg} onChange={handleCustomColorChange} className="w-10 h-10 rounded cursor-pointer border-0 bg-transparent" />
+                </label>
+                <label className="flex flex-col items-center gap-1 text-[11px] text-gray-400">
+                  글자선
+                  <input type="color" name="text" value={formData.customColor.text} onChange={handleCustomColorChange} className="w-10 h-10 rounded cursor-pointer border-0 bg-transparent" />
+                </label>
+                <label className="flex flex-col items-center gap-1 text-[11px] text-gray-400">
+                  포인트
+                  <input type="color" name="accent" value={formData.customColor.accent} onChange={handleCustomColorChange} className="w-10 h-10 rounded cursor-pointer border-0 bg-transparent" />
+                </label>
+              </div>
+            )}
           </div>
 
           <div className="space-y-1">
@@ -254,13 +248,13 @@ export default function App() {
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs text-emerald-400 font-bold uppercase tracking-wider">Memorable (기억에 남는 점)</label>
+            <label className="text-xs text-emerald-400 font-bold uppercase tracking-wider">Memorable (기억에 남는)</label>
             <textarea name="memorable" value={formData.memorable} onChange={handleChange} rows={2}
               className="w-full bg-gray-800 border border-gray-700 rounded p-2 focus:border-emerald-500 outline-none resize-none text-gray-200" />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs text-rose-400 font-bold uppercase tracking-wider">Hidden (보여주지 못한 점)</label>
+            <label className="text-xs text-rose-400 font-bold uppercase tracking-wider">Hidden (보여주지 못한)</label>
             <textarea name="hidden" value={formData.hidden} onChange={handleChange} rows={2}
               className="w-full bg-gray-800 border border-gray-700 rounded p-2 focus:border-rose-500 outline-none resize-none text-gray-200" />
           </div>
@@ -307,23 +301,23 @@ export default function App() {
         <div 
           id="session-card" 
           ref={cardRef}
-          className={`w-full max-w-[800px] shadow-2xl relative overflow-hidden flex flex-col transition-colors duration-300 ${currentTheme.text}`}
+          className="w-full max-w-[800px] shadow-2xl relative overflow-hidden flex flex-col transition-colors duration-300"
           style={{ 
             backgroundColor: currentTheme.bg,
+            color: currentTheme.text,
             backgroundImage: paperTexture,
             boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
-            // 텍스트 쏠림 방지를 위해 line-height를 명시적으로 설정
             lineHeight: '1.6' 
           }}
         >
-          {/* 장식선 */}
-          <div className={`absolute inset-2 border ${currentTheme.border} opacity-50 pointer-events-none`}></div>
-          <div className={`absolute inset-3 border ${currentTheme.border} opacity-30 pointer-events-none`}></div>
+          {/* 장식선 (인라인 스타일 적용) */}
+          <div className="absolute inset-2 border opacity-50 pointer-events-none" style={{ borderColor: currentTheme.border }}></div>
+          <div className="absolute inset-3 border opacity-30 pointer-events-none" style={{ borderColor: currentTheme.border }}></div>
           
           <div className="p-8 md:p-12 z-10 w-full flex flex-col">
             
             {/* 1. 헤더 (타이틀 & 날짜) */}
-            <header className={`text-center border-b-2 ${currentTheme.border} pb-6 mb-8`}>
+            <header className="text-center border-b-2 pb-6 mb-8" style={{ borderColor: currentTheme.border }}>
               <h2 className="text-3xl md:text-5xl font-serif font-bold tracking-tight mb-3">
                 {formData.scenarioName || '시나리오명 미입력'}
               </h2>
@@ -332,9 +326,9 @@ export default function App() {
               </p>
             </header>
 
-            {/* 2. 세션 카드 이미지 (본문 최상단) */}
+            {/* 2. 세션 카드 이미지 */}
             {formData.image && (
-              <div className={`w-full mb-8 border-2 ${currentTheme.border} p-2 bg-black/5`}>
+              <div className="w-full mb-8 border-2 p-2 bg-black/5" style={{ borderColor: currentTheme.border }}>
                 <img 
                   src={formData.image} 
                   alt="Session Card" 
@@ -343,22 +337,25 @@ export default function App() {
               </div>
             )}
 
-            {/* 3. KP/PL 정보 */}
-            <div className={`flex flex-col gap-5 justify-center items-center p-6 mb-8 ${currentTheme.accent} rounded-sm text-center`}>
+            {/* 3. KP/PL 정보 (포인트 색상 적용) */}
+            <div 
+              className="flex flex-col gap-5 justify-center items-center p-6 mb-8 rounded-sm text-center"
+              style={{ backgroundColor: currentTheme.accentBg, color: currentTheme.accentText }}
+            >
               <div className="w-full">
                 <div className="font-serif text-xs opacity-80 tracking-widest mb-1">{formData.gmTitle}</div>
-                <div className="font-bold text-base leading-none">{formData.gm || '-'}</div>
+                <div className="font-bold text-lg">{formData.gm || '-'}</div>
               </div>
               <div className="w-12 h-px bg-current opacity-30"></div>
               <div className="w-full">
                 <div className="font-serif text-xs opacity-80 tracking-widest mb-1">PLAYER</div>
-                <div className="font-bold text-base leading-snug break-keep">{formData.pl || '-'}</div>
+                <div className="font-bold text-base break-keep">{formData.pl || '-'}</div>
               </div>
             </div>
 
             {/* 4. 시놉시스 */}
             <div className="space-y-3 mb-8">
-              <h3 className={`font-serif font-bold text-2xl border-b ${currentTheme.border} pb-2 inline-block`}>Synopsis</h3>
+              <h3 className="font-serif font-bold text-2xl border-b pb-2 inline-block" style={{ borderColor: currentTheme.border }}>Synopsis</h3>
               <p className="leading-relaxed whitespace-pre-wrap text-base opacity-90">
                 {formData.summary || '내용이 없습니다.'}
               </p>
@@ -369,9 +366,9 @@ export default function App() {
               {formData.memorable && (
                 <div className="space-y-2">
                   <h4 className="font-serif font-bold text-lg flex items-center gap-2 uppercase tracking-wide">
-                    <span className={`w-1.5 h-1.5 rounded-full ${currentTheme.accentDot}`}></span> Memorable
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: currentTheme.accentBg }}></span> Memorable
                   </h4>
-                  <p className={`text-sm leading-relaxed pl-4 border-l-2 ${currentTheme.border} whitespace-pre-wrap opacity-90`}>
+                  <p className="text-sm leading-relaxed pl-4 border-l-2 whitespace-pre-wrap opacity-90" style={{ borderColor: currentTheme.border }}>
                     {formData.memorable}
                   </p>
                 </div>
@@ -379,9 +376,9 @@ export default function App() {
               {formData.hidden && (
                 <div className="space-y-2">
                   <h4 className="font-serif font-bold text-lg flex items-center gap-2 uppercase tracking-wide">
-                    <span className={`w-1.5 h-1.5 rounded-full ${currentTheme.accentDot}`}></span> Hidden
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: currentTheme.accentBg }}></span> Hidden
                   </h4>
-                  <p className={`text-sm leading-relaxed pl-4 border-l-2 ${currentTheme.border} whitespace-pre-wrap opacity-90`}>
+                  <p className="text-sm leading-relaxed pl-4 border-l-2 whitespace-pre-wrap opacity-90" style={{ borderColor: currentTheme.border }}>
                     {formData.hidden}
                   </p>
                 </div>
@@ -389,9 +386,9 @@ export default function App() {
               {formData.focus && (
                 <div className="space-y-2">
                   <h4 className="font-serif font-bold text-lg flex items-center gap-2 uppercase tracking-wide">
-                    <span className={`w-1.5 h-1.5 rounded-full ${currentTheme.accentDot}`}></span> Focus
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: currentTheme.accentBg }}></span> Focus
                   </h4>
-                  <p className={`text-sm leading-relaxed pl-4 border-l-2 ${currentTheme.border} whitespace-pre-wrap opacity-90`}>
+                  <p className="text-sm leading-relaxed pl-4 border-l-2 whitespace-pre-wrap opacity-90" style={{ borderColor: currentTheme.border }}>
                     {formData.focus}
                   </p>
                 </div>
@@ -399,9 +396,9 @@ export default function App() {
               {formData.after && (
                 <div className="space-y-2">
                   <h4 className="font-serif font-bold text-lg flex items-center gap-2 uppercase tracking-wide">
-                    <span className={`w-1.5 h-1.5 rounded-full ${currentTheme.accentDot}`}></span> After
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: currentTheme.accentBg }}></span> After
                   </h4>
-                  <p className={`text-sm leading-relaxed pl-4 border-l-2 ${currentTheme.border} whitespace-pre-wrap opacity-90`}>
+                  <p className="text-sm leading-relaxed pl-4 border-l-2 whitespace-pre-wrap opacity-90" style={{ borderColor: currentTheme.border }}>
                     {formData.after}
                   </p>
                 </div>
@@ -424,7 +421,10 @@ export default function App() {
           </div>
           
           {/* 하단 푸터 */}
-          <div className={`${currentTheme.accent} text-center py-2 text-xs font-serif tracking-widest mt-auto z-10 w-full`}>
+          <div 
+            className="text-center py-2 text-xs font-serif tracking-widest mt-auto z-10 w-full"
+            style={{ backgroundColor: currentTheme.accentBg, color: currentTheme.accentText }}
+          >
             CALL OF CTHULHU SESSION LOG
           </div>
         </div>
